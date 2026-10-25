@@ -1,0 +1,34 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4"
+      - name: Lint the script
+        run: shellcheck --severity=warning complete-stories.sh
+      - name: Run tests
+        run: ruby test/complete_stories_test.rb
+
+  # Runs the action itself. This repository has no deploy workflow, so it stops
+  # at "no earlier successful deploy" without reaching Shortcut.
+  action:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./
+        with:
+          release-tag: v1
+          dry-run: "true"

@@ -1,0 +1,58 @@
+name: Shortcut Complete Stories
+description: >-
+  Move the Shortcut stories a deployed release shipped to Completed. Stories are
+  read as sc-NNNN from the branch names and titles of the pull requests merged
+  since the last successful deploy.
+
+inputs:
+  release-tag:
+    description: Tag of the release that was just deployed, e.g. 2026.10.25+3.
+    required: true
+  shortcut-token:
+    description: Shortcut API token. Not needed with dry-run.
+    required: false
+    default: ""
+  github-token:
+    description: >-
+      Token that reads the deploy workflow's runs and the release's pull
+      requests. Needs `actions: read`, `contents: read` and `pull-requests: read`.
+    required: false
+    default: ${{ github.token }}
+  workflow:
+    description: >-
+      Deploy workflow file. Its successful runs, titled "Deploy: <tag>" or
+      "Release <tag>", give the previous release.
+    required: false
+    default: deploy.yml
+  base-branch:
+    description: Only pull requests merged into this branch count.
+    required: false
+    default: main
+  end-state:
+    description: Workflow state the stories move to.
+    required: false
+    default: Completed
+  workspace:
+    description: Shortcut workspace slug, for the story links in the run summary.
+    required: false
+    default: apsure
+  dry-run:
+    description: List the pull requests and stories without changing Shortcut.
+    required: false
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - name: Complete stories
+      shell: bash
+      run: '"$GITHUB_ACTION_PATH/complete-stories.sh" "$RELEASE_TAG"'
+      env:
+        RELEASE_TAG: ${{ inputs.release-tag }}
+        GH_TOKEN: ${{ inputs.github-token }}
+        SHORTCUT_TOKEN: ${{ inputs.shortcut-token }}
+        WORKFLOW: ${{ inputs.workflow }}
+        BASE_BRANCH: ${{ inputs.base-branch }}
+        END_STATE: ${{ inputs.end-state }}
+        SHORTCUT_WORKSPACE: ${{ inputs.workspace }}
+        DRY_RUN: ${{ inputs.dry-run == 'true' && '1' || '' }}
