@@ -16,6 +16,10 @@ class CompleteStoriesTest < Minitest::Test
     # story in the branch, PR 11 in the title.
     stub_command("gh", <<~'BASH')
       args="$*"; echo "gh ${args//$'\n'/ }" >> "$CALL_LOG"
+      case "$*" in *"${FAIL_GH:-none}"*) echo "HTTP 503: Service Unavailable" >&2; exit 1 ;; esac
+      if [ -n "${OLD_GH:-}" ] && [ "$1 $2" = "api --allow-escape-sequences" ]; then
+        echo 'unknown flag: --allow-escape-sequences' >&2; exit 1
+      fi
       case "$*" in
         "run list"*) printf '%s\t%s\n' 3 "Deploy: 2026.10.26+1" 2 "Release 2026.10.25+3" 1 "Deploy: 2026.10.24+1" ;;
         *runs/*/jobs*) run="${args##*runs/}"; echo "${run%%/*}" ;;
@@ -90,7 +94,7 @@ class CompleteStoriesTest < Minitest::Test
       case "$*" in
         "run list"*) printf '%s\t%s\n' 3 "Deploy: 2026.10.26+1" ;;
         *runs/*/jobs*) echo 3 ;;
-        *jobs/*/logs*) exit 1 ;;
+        *jobs/*/logs*) echo "HTTP 410: Gone" >&2; exit 1 ;;
       esac
     BASH
 
@@ -98,6 +102,37 @@ class CompleteStoriesTest < Minitest::Test
 
     assert status.success?, output
     assert_includes gh_call("compare/"), "compare/2026.10.26+1...2026.10.27+1"
+  end
+
+  def test_when_no_deploy_completed_its_stories_starts_from_the_oldest
+    output, status = run_script("UNFINISHED_JOBS" => "3 2 1")
+
+    assert status.success?, output
+    assert_includes gh_call("compare/"), "compare/2026.10.24+1...2026.10.27+1"
+    assert_includes output, "those of 2026.10.24+1 and earlier must be completed by hand"
+    assert_includes summary, "didn't complete them: 2026.10.26+1 2026.10.25+3\n"
+  end
+
+  def test_a_github_error_reading_a_deploy_fails_without_finishing
+    output, status = run_script("FAIL_GH" => "logs")
+
+    refute status.success?
+    assert_includes output, "Could not read the deploy run for 2026.10.26+1"
+    refute_includes output, "shortcut-complete-stories: finished"
+    assert_empty updates
+  end
+
+  def test_reads_every_page_of_a_runs_jobs
+    run_script
+
+    assert_includes gh_call("runs/3/jobs"), "--paginate"
+  end
+
+  def test_reads_logs_with_a_gh_that_has_no_escape_sequence_flag
+    output, status = run_script("OLD_GH" => "1", "UNFINISHED_JOBS" => "3")
+
+    assert status.success?, output
+    assert_includes gh_call("compare/"), "compare/2026.10.25+3...2026.10.27+1"
   end
 
   def test_logs_finished_only_when_it_succeeds

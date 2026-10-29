@@ -21,7 +21,10 @@ Used with the changelog actions suite:
   and, when it succeeds, `shortcut-complete-stories: finished`. A run whose job
   log has the first line but not the second is passed over. A run without
   either line (from before v1.0.1, or whose logs have expired) counts. A dry run
-  or a release with no stories succeeds, so it counts too.
+  or a release with no stories succeeds, so it counts too. A GitHub error while
+  reading the runs fails the step, so the next deploy tries again. If none of
+  the last 30 deploys completed its stories, it starts from the oldest and
+  warns that the stories of that release and earlier need completing by hand.
 - **The stories** are read as `sc-NNNN` from the branch name and title of each
   pull request merged into `base-branch` in that range. The description doesn't
   count: it often mentions related or stacked stories that must stay open.

@@ -31,7 +31,12 @@ workspace="${SHORTCUT_WORKSPACE:-apsure}"
 # run completed its stories. Any exit but success leaves "finished" out.
 marker="shortcut-complete-stories:"
 echo "$marker started"
-trap '[ "$?" -ne 0 ] || echo "$marker finished"' EXIT
+finish() {
+  local status=$?
+  rm -f "${errors:-}"
+  [ "$status" -ne 0 ] || echo "$marker finished"
+}
+trap finish EXIT
 
 if [ -z "${SHORTCUT_TOKEN:-}" ] && [ -z "${DRY_RUN:-}" ]; then
   echo "::error::Set shortcut-token to complete stories when they deploy."
@@ -46,34 +51,58 @@ fi
 # a run that logged "started" but not "finished" is passed over, and the next
 # deploy retries its stories. A run without the lines (from before the action
 # logged them, or whose logs have expired) counts.
-job_log() {
-  # Newer gh refuses to print the runner's colour codes without the flag.
-  gh api --allow-escape-sequences "repos/$repo/actions/jobs/$1/logs" 2>/dev/null \
-    || gh api "repos/$repo/actions/jobs/$1/logs" 2>/dev/null || true
+#
+# A GitHub error while reading a run fails the step (without "finished"), so
+# a run isn't mistaken for complete and the next deploy tries again.
+errors="$(mktemp)"
+gh_log() {
+  gh api "$@" 2>"$errors" && return
+  # Older gh has no --allow-escape-sequences; it prints the log without it.
+  if grep -q "unknown flag" "$errors"; then
+    gh api "${@:2}" 2>"$errors" && return
+  fi
+  # Expired or deleted logs.
+  grep -qE "HTTP (404|410)" "$errors" && return
+  cat "$errors" >&2
+  return 1
 }
+# 0 when the run completed its stories, 1 when it didn't, 2 on a GitHub error.
 completed_stories() {
-  local job log
-  for job in $(gh api "repos/$repo/actions/runs/$1/jobs?per_page=100" --jq '.jobs[].id'); do
-    log="$(job_log "$job")"
+  local jobs job log
+  jobs="$(gh api --paginate "repos/$repo/actions/runs/$1/jobs?per_page=100" --jq '.jobs[].id')" || return 2
+  for job in $jobs; do
+    # Newer gh refuses to print the runner's colour codes without the flag.
+    log="$(gh_log --allow-escape-sequences "repos/$repo/actions/jobs/$job/logs")" || return 2
     if grep -qF "$marker started" <<<"$log" && ! grep -qF "$marker finished" <<<"$log"; then
       return 1
     fi
   done
 }
+runs="$(gh run list --repo "$repo" --workflow "$workflow_file" --status success --limit 30 \
+  --json databaseId,displayTitle --jq '.[] | [.databaseId, .displayTitle] | @tsv')"
 base=""
 retried=""
+oldest=""
 while IFS=$'\t' read -r run_id title; do
   release="$(sed -nE 's/^(Deploy: |Release )//p' <<<"$title")"
   if [ -z "$release" ] || [ "$release" = "$tag" ]; then
     continue
   fi
-  if completed_stories "$run_id"; then
-    base="$release"
-    break
-  fi
-  retried="$retried $release"
-done < <(gh run list --repo "$repo" --workflow "$workflow_file" --status success --limit 30 \
-  --json databaseId,displayTitle --jq '.[] | [.databaseId, .displayTitle] | @tsv')
+  completed_stories "$run_id" && result=0 || result=$?
+  case "$result" in
+    0) base="$release"; break ;;
+    1) retried="$retried $release"; oldest="$release" ;;
+    *) echo "::error::Could not read the deploy run for $release."; exit 1 ;;
+  esac
+done <<<"$runs"
+# Every earlier deploy in reach failed to complete its stories. Starting from
+# the oldest still completes the ones after it, and this run then becomes the
+# base, so say which release's stories need completing by hand.
+if [ -z "$base" ] && [ -n "$oldest" ]; then
+  base="$oldest"
+  retried="${retried% "$oldest"}"
+  echo "::warning::No deploy among the last 30 completed its stories, so those of $oldest and earlier must be completed by hand."
+fi
 if [ -z "$base" ]; then
   echo "::notice::No earlier successful deploy, so no stories to complete."
   exit 0
