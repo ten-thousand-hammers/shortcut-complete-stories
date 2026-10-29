@@ -122,6 +122,26 @@ class CompleteStoriesTest < Minitest::Test
     assert_empty updates
   end
 
+  def test_a_repository_without_the_deploy_workflow_has_no_earlier_deploy
+    stub_command("gh", <<~'BASH')
+      echo "HTTP 404: workflow deploy.yml not found on the default branch" >&2; exit 1
+    BASH
+
+    output, status = run_script
+
+    assert status.success?, output
+    assert_includes output, "No earlier successful deploy"
+    assert_includes output, "shortcut-complete-stories: finished"
+  end
+
+  def test_a_github_error_listing_deploys_fails_without_finishing
+    output, status = run_script("FAIL_GH" => "run list")
+
+    refute status.success?
+    assert_includes output, "HTTP 503"
+    refute_includes output, "shortcut-complete-stories: finished"
+  end
+
   def test_reads_every_page_of_a_runs_jobs
     run_script
 

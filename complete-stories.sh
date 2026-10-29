@@ -78,8 +78,15 @@ completed_stories() {
     fi
   done
 }
-runs="$(gh run list --repo "$repo" --workflow "$workflow_file" --status success --limit 30 \
-  --json databaseId,displayTitle --jq '.[] | [.databaseId, .displayTitle] | @tsv')"
+# A repository without the workflow yet has no earlier deploy.
+if ! runs="$(gh run list --repo "$repo" --workflow "$workflow_file" --status success --limit 30 \
+  --json databaseId,displayTitle --jq '.[] | [.databaseId, .displayTitle] | @tsv' 2>"$errors")"; then
+  if ! grep -q "HTTP 404" "$errors"; then
+    cat "$errors" >&2
+    exit 1
+  fi
+  runs=""
+fi
 base=""
 retried=""
 oldest=""
