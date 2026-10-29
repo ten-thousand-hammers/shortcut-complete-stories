@@ -78,14 +78,15 @@ completed_stories() {
     fi
   done
 }
-# A repository without the workflow yet has no earlier deploy.
+# A missing workflow is most likely a mistyped or renamed input, so it fails
+# the step rather than quietly completing nothing.
 if ! runs="$(gh run list --repo "$repo" --workflow "$workflow_file" --status success --limit 30 \
   --json databaseId,displayTitle --jq '.[] | [.databaseId, .displayTitle] | @tsv' 2>"$errors")"; then
-  if ! grep -q "HTTP 404" "$errors"; then
-    cat "$errors" >&2
-    exit 1
+  cat "$errors" >&2
+  if grep -q "HTTP 404" "$errors"; then
+    echo "::error::The workflow input names $workflow_file, which $repo doesn't have."
   fi
-  runs=""
+  exit 1
 fi
 base=""
 retried=""

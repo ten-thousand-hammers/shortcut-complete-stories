@@ -122,16 +122,30 @@ class CompleteStoriesTest < Minitest::Test
     assert_empty updates
   end
 
-  def test_a_repository_without_the_deploy_workflow_has_no_earlier_deploy
+  def test_a_missing_workflow_fails_naming_the_input
     stub_command("gh", <<~'BASH')
       echo "HTTP 404: workflow deploy.yml not found on the default branch" >&2; exit 1
     BASH
 
     output, status = run_script
 
+    refute status.success?
+    assert_includes output, "::error::The workflow input names deploy.yml"
+    refute_includes output, "shortcut-complete-stories: finished"
+  end
+
+  def test_a_workflow_without_an_earlier_deploy_completes_nothing
+    stub_command("gh", <<~'BASH')
+      args="$*"; echo "gh ${args//$'\n'/ }" >> "$CALL_LOG"
+      case "$*" in "run list"*) printf '%s\t%s\n' 5 "Test" ;; esac
+    BASH
+
+    output, status = run_script
+
     assert status.success?, output
-    assert_includes output, "No earlier successful deploy"
+    assert_includes output, "::notice::No earlier successful deploy"
     assert_includes output, "shortcut-complete-stories: finished"
+    assert_empty updates
   end
 
   def test_a_github_error_listing_deploys_fails_without_finishing

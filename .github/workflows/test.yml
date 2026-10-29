@@ -18,8 +18,9 @@ jobs:
       - name: Run tests
         run: ruby test/complete_stories_test.rb
 
-  # Runs the action itself. This repository has no deploy workflow, so it stops
-  # at "no earlier successful deploy" without reaching Shortcut.
+  # Runs the action itself. This repository has no deploy workflow, so it reads
+  # this one, whose runs aren't titled as deploys, and stops at "no earlier
+  # successful deploy" without reaching Shortcut.
   action:
     runs-on: ubuntu-latest
     permissions:
@@ -31,4 +32,5 @@ jobs:
       - uses: ./
         with:
           release-tag: v1
+          workflow: test.yml
           dry-run: "true"
