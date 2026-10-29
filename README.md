@@ -15,13 +15,21 @@ Used with the changelog actions suite:
   the previous tag, so a failed deploy's stories complete with the next deploy
   that works. The last deploy is the newest successful run of `workflow` titled
   `Deploy: <tag>` or `Release <tag>`, for a tag other than `release-tag`.
+- **A failed Shortcut update is retried** by the next deploy. With
+  `continue-on-error`, the run still succeeds and the API reports the failed
+  step as a success too, so the action logs `shortcut-complete-stories: started`
+  and, when it succeeds, `shortcut-complete-stories: finished`. A run whose job
+  log has the first line but not the second is passed over. A run without
+  either line (from before v1.1.0, or whose logs have expired) counts. A dry run
+  or a release with no stories succeeds, so it counts too.
 - **The stories** are read as `sc-NNNN` from the branch name and title of each
   pull request merged into `base-branch` in that range. The description doesn't
   count: it often mentions related or stacked stories that must stay open.
 - **A redeploy of an older release** completes nothing, because the compare
   from the last deploy to an older tag has no commits.
 - **A Shortcut error** skips only that story. The others are still moved, and
-  the step fails at the end so the warning shows on the run. Stories that are
+  the step fails at the end so the warning shows on the run and the next deploy
+  retries. Stories that are
   already done, missing, or whose workflow has no `end-state` state are noted
   and skipped.
 - **The run summary** lists the pull requests deployed and each story moved.
@@ -77,7 +85,7 @@ upstream change to run with.
 | --- | --- | --- |
 | `release-tag` | _(required)_ | Tag of the release that was just deployed. |
 | `shortcut-token` | `""` | Shortcut API token. Not needed with `dry-run`. |
-| `github-token` | `${{ github.token }}` | Reads deploy runs, the compare and the pull requests. Needs `actions: read`, `contents: read` and `pull-requests: read`. |
+| `github-token` | `${{ github.token }}` | Reads deploy runs and their job logs, the compare and the pull requests. Needs `actions: read`, `contents: read` and `pull-requests: read`. |
 | `workflow` | `deploy.yml` | Deploy workflow file whose successful runs give the previous release. |
 | `base-branch` | `main` | Only pull requests merged into this branch count. |
 | `end-state` | `Completed` | Workflow state the stories move to. |

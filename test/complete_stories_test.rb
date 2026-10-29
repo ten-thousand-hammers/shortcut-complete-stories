@@ -11,12 +11,20 @@ class CompleteStoriesTest < Minitest::Test
   def setup
     @directory = Dir.mktmpdir
     FileUtils.mkdir_p("#{@directory}/bin")
-    # The previous release is found from deploy run titles; PR 10 names its story in the
-    # branch, PR 11 in the title.
+    # The previous release is found from deploy run titles, passing over runs whose job
+    # log (job N for run N) started this action without finishing it. PR 10 names its
+    # story in the branch, PR 11 in the title.
     stub_command("gh", <<~'BASH')
       args="$*"; echo "gh ${args//$'\n'/ }" >> "$CALL_LOG"
       case "$*" in
-        "run list"*) printf '%s\n' "Deploy: 2026.10.26+1" "Release 2026.10.25+3" ;;
+        "run list"*) printf '%s\t%s\n' 3 "Deploy: 2026.10.26+1" 2 "Release 2026.10.25+3" 1 "Deploy: 2026.10.24+1" ;;
+        *runs/*/jobs*) run="${args##*runs/}"; echo "${run%%/*}" ;;
+        *jobs/*/logs*)
+          job="${args##*jobs/}"; job="${job%%/*}"
+          case " ${UNFINISHED_JOBS:-} " in
+            *" $job "*) printf '2026-10-26T10:00:00Z shortcut-complete-stories: started\n' ;;
+            *) printf '2026-10-26T10:00:00Z shortcut-complete-stories: started\n2026-10-26T10:00:01Z shortcut-complete-stories: finished\n' ;;
+          esac ;;
         *compare/*) printf 'aaa\nbbb\n' ;;
         *commits/aaa/pulls*) printf '10\tnathanpalmer/sc-11/first\tfeat: first\n' ;;
         *commits/bbb/pulls*) printf '11\tfix/other\tfix: other [sc-12]\n' ;;
@@ -66,6 +74,41 @@ class CompleteStoriesTest < Minitest::Test
 
     assert status.success?, output
     assert_includes gh_call("compare/"), "compare/2026.10.25+3...2026.10.26+1"
+  end
+
+  def test_retries_the_stories_of_deploys_that_did_not_finish_completing_them
+    output, status = run_script("UNFINISHED_JOBS" => "3 2")
+
+    assert status.success?, output
+    assert_includes gh_call("compare/"), "compare/2026.10.24+1...2026.10.27+1"
+    assert_includes summary, "Retrying the stories of deploys that didn't complete them: 2026.10.26+1 2026.10.25+3"
+  end
+
+  def test_a_deploy_without_the_log_lines_counts_as_completed
+    stub_command("gh", <<~'BASH')
+      args="$*"; echo "gh ${args//$'\n'/ }" >> "$CALL_LOG"
+      case "$*" in
+        "run list"*) printf '%s\t%s\n' 3 "Deploy: 2026.10.26+1" ;;
+        *runs/*/jobs*) echo 3 ;;
+        *jobs/*/logs*) exit 1 ;;
+      esac
+    BASH
+
+    output, status = run_script
+
+    assert status.success?, output
+    assert_includes gh_call("compare/"), "compare/2026.10.26+1...2026.10.27+1"
+  end
+
+  def test_logs_finished_only_when_it_succeeds
+    output, status = run_script
+    assert status.success?, output
+    assert_match(/started\n.*finished\n\z/m, output)
+
+    output, status = run_script("FAIL_PUT" => "11")
+    refute status.success?
+    assert_includes output, "shortcut-complete-stories: started"
+    refute_includes output, "shortcut-complete-stories: finished"
   end
 
   def test_inputs_choose_the_workflow_branch_state_and_workspace

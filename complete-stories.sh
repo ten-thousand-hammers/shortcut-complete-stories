@@ -7,9 +7,9 @@
 # never completes them, and a story isn't done until it's in production. The
 # action runs this at the end of a deploy job, after the deploy is verified.
 #
-# The release covers every commit since the last successful deploy (not the
-# previous tag, so a failed deploy's stories are completed by the next one that
-# works). Each pull request merged into the base branch in that range names its
+# The release covers every commit since the last successful deploy that
+# completed its stories (not the previous tag, so the stories of a failed
+# deploy, or of a failed Shortcut update, are completed by the next deploy). Each pull request merged into the base branch in that range names its
 # stories as sc-NNNN in its branch name or title. The description doesn't
 # count: it often mentions related or stacked stories that must stay open.
 #
@@ -27,17 +27,53 @@ base_branch="${BASE_BRANCH:-main}"
 end_state="${END_STATE:-Completed}"
 workspace="${SHORTCUT_WORKSPACE:-apsure}"
 
+# The next deploy reads these lines from this job's log to tell whether this
+# run completed its stories. Any exit but success leaves "finished" out.
+marker="shortcut-complete-stories:"
+echo "$marker started"
+trap '[ "$?" -ne 0 ] || echo "$marker finished"' EXIT
+
 if [ -z "${SHORTCUT_TOKEN:-}" ] && [ -z "${DRY_RUN:-}" ]; then
   echo "::error::Set shortcut-token to complete stories when they deploy."
   exit 1
 fi
 
-# The newest successful deploy of another release. Deploy runs are titled
-# "Deploy: <tag>" (the workflow's run-name). Runs titled with the release name,
-# "Release <tag>", count too.
-base="$(gh run list --repo "$repo" --workflow "$workflow_file" --status success --limit 20 \
-  --json displayTitle --jq '.[].displayTitle' \
-  | sed -nE 's/^(Deploy: |Release )//p' | grep -vxF "$tag" | head -1 || true)"
+# The newest successful deploy of another release that completed its stories.
+# Deploy runs are titled "Deploy: <tag>" (the workflow's run-name). Runs titled
+# with the release name, "Release <tag>", count too. Callers run this action
+# with continue-on-error, so a run whose Shortcut update failed still succeeds,
+# and the API reports the failed step as a success too. So the job logs tell:
+# a run that logged "started" but not "finished" is passed over, and the next
+# deploy retries its stories. A run without the lines (from before the action
+# logged them, or whose logs have expired) counts.
+job_log() {
+  # Newer gh refuses to print the runner's colour codes without the flag.
+  gh api --allow-escape-sequences "repos/$repo/actions/jobs/$1/logs" 2>/dev/null \
+    || gh api "repos/$repo/actions/jobs/$1/logs" 2>/dev/null || true
+}
+completed_stories() {
+  local job log
+  for job in $(gh api "repos/$repo/actions/runs/$1/jobs?per_page=100" --jq '.jobs[].id'); do
+    log="$(job_log "$job")"
+    if grep -qF "$marker started" <<<"$log" && ! grep -qF "$marker finished" <<<"$log"; then
+      return 1
+    fi
+  done
+}
+base=""
+retried=""
+while IFS=$'\t' read -r run_id title; do
+  release="$(sed -nE 's/^(Deploy: |Release )//p' <<<"$title")"
+  if [ -z "$release" ] || [ "$release" = "$tag" ]; then
+    continue
+  fi
+  if completed_stories "$run_id"; then
+    base="$release"
+    break
+  fi
+  retried="$retried $release"
+done < <(gh run list --repo "$repo" --workflow "$workflow_file" --status success --limit 30 \
+  --json databaseId,displayTitle --jq '.[] | [.databaseId, .displayTitle] | @tsv')
 if [ -z "$base" ]; then
   echo "::notice::No earlier successful deploy, so no stories to complete."
   exit 0
@@ -63,6 +99,10 @@ ids="$(cut -f2- <<<"$prs" \
   echo
   echo "Pull requests deployed since $base: $(cut -f1 <<<"$prs" | grep . | sed 's/^/#/' | paste -sd ' ' - | grep . || echo none)"
   echo
+  if [ -n "$retried" ]; then
+    echo "Retrying the stories of deploys that didn't complete them:$retried"
+    echo
+  fi
 } >> "$summary"
 
 if [ -z "$ids" ]; then
