@@ -20,7 +20,7 @@ Used with the changelog actions suite:
   step as a success too, so the action logs `shortcut-complete-stories: started`
   and, when it succeeds, `shortcut-complete-stories: finished`. A run whose job
   log has the first line but not the second is passed over. A run without
-  either line (from before v1.1.0, or whose logs have expired) counts. A dry run
+  either line (from before v1.0.1, or whose logs have expired) counts. A dry run
   or a release with no stories succeeds, so it counts too.
 - **The stories** are read as `sc-NNNN` from the branch name and title of each
   pull request merged into `base-branch` in that range. The description doesn't
