@@ -2,7 +2,7 @@ name: Shortcut Complete Stories
 description: >-
   Move the Shortcut stories a deployed release shipped to Completed. Stories are
   read as sc-NNNN from the branch names and titles of the pull requests merged
-  since the last successful deploy.
+  since the last deploy that completed its stories.
 
 inputs:
   release-tag:
@@ -14,14 +14,16 @@ inputs:
     default: ""
   github-token:
     description: >-
-      Token that reads the deploy workflow's runs and the release's pull
-      requests. Needs `actions: read`, `contents: read` and `pull-requests: read`.
+      Token that reads the deploy workflow's runs and job logs and the release's
+      pull requests. Needs `actions: read`, `contents: read` and `pull-requests: read`.
     required: false
     default: ${{ github.token }}
   workflow:
     description: >-
       Deploy workflow file. Its successful runs, titled "Deploy: <tag>" or
-      "Release <tag>", give the previous release.
+      "Release <tag>", give the previous release. A run whose job log shows this
+      action started but didn't finish is passed over, so its stories are
+      retried.
     required: false
     default: deploy.yml
   base-branch:
